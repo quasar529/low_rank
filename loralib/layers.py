@@ -143,6 +143,29 @@ class Linear(nn.Linear, LoRALayer):
     #             if self.r > 0:
     #                 self.weight.data += T(self.lora_B @ self.lora_A) * self.scaling
     #             self.merged = True
+    def train(self, mode: bool = True):
+        def T(w):
+            return w.T if self.fan_in_fan_out else w
+
+        nn.Linear.train(self, mode)
+
+        # if self.merge_weights and self.merged:
+        #     # Make sure that the weights are not merged
+        #     if self.r > 0:
+        #         self.weight.data -= T(self.lora_B @ self.lora_A) * self.scaling
+        #     self.merged = False
+
+    def eval(self):
+        def T(w):
+            return w.T if self.fan_in_fan_out else w
+
+        nn.Linear.eval(self)
+
+        # if self.merge_weights and not self.merged:
+        #     # Merge the weights and mark it
+        #     if self.r > 0:
+        #         self.weight.data += T(self.lora_B @ self.lora_A) * self.scaling
+        #     self.merged = True
 
     def forward(self, x: torch.Tensor):
         # def T(w):

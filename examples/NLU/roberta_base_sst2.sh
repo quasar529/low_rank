@@ -1,12 +1,12 @@
 # export num_gpus=8
 # export CUBLAS_WORKSPACE_CONFIG=":16:8" # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
 # export PYTHONHASHSEED=0
-export output_dir="./sst2/r128_2nd"
-python examples/text-classification/run_glue.py \
+export output_dir="./sst2/eval_test"
+python /home/lab/bumjun/low_rank/examples/NLU/examples/text-classification/run_glue.py \
 --model_name_or_path textattack/roberta-base-SST-2 \
 --task_name sst2 \
---do_train \
---do_eval \
+--do_train True \
+--do_eval True \
 --max_seq_length 128 \
 --per_device_train_batch_size 64 \
 --learning_rate 9e-5 \
