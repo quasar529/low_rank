@@ -80,7 +80,7 @@ def recon_error(original_weight, approx_weight):
     return torch.linalg.norm(original_weight.to(device) - approx_weight.to(device), "fro")
 
 
-def insert_lora(model, dim, rank, lora_alpha):
+def add_lora_to_roberta(model, dim, rank, lora_alpha):
     len_of_layers = 12  # len(model.roberta.encoder)
     for i in range(len_of_layers):
         model.roberta.encoder.layer[i].attention.self.query = copy.deepcopy(
@@ -91,7 +91,10 @@ def insert_lora(model, dim, rank, lora_alpha):
         )
 
 
-def W_weight_copy(new_model, W_model):
+def copy_weights(new_model, W_model):
+    """
+    W_model의 W weight를 new_model의 W weight로 복사
+    """
     len_of_layers = 12
     q_encoder_weight_list = []
     v_encoder_weight_list = []
@@ -126,7 +129,7 @@ def make_W_zero(model):
     print("AFTER make W 0", model.roberta.encoder.layer[0].attention.self.query.weight.data)
 
 
-def dW_init_by_SVD(model, SVD_model, rank):
+def initialize_dW_with_svd(model, model_original, approx_rank):
     print(
         "BEFORE INIT LORA",
         model.roberta.encoder.layer[0].attention.self.query.lora_A,
@@ -141,13 +144,11 @@ def dW_init_by_SVD(model, SVD_model, rank):
     len_of_layers = 12  # len(SVD_model.roberta.encoder.layer)
     with torch.no_grad():
         for i in range(len_of_layers):
-            encoder_q_original_weight = SVD_model.roberta.encoder.layer[i].attention.self.query.weight.data.T
-            encoder_v_original_weight = SVD_model.roberta.encoder.layer[i].attention.self.value.weight.data.T
+            encoder_q_original_weight = model_original.roberta.encoder.layer[i].attention.self.query.weight.data.T
+            encoder_v_original_weight = model_original.roberta.encoder.layer[i].attention.self.value.weight.data.T
 
             encoder_q_u, encoder_q_s, encoder_q_v = torch.linalg.svd(encoder_q_original_weight)
             encoder_v_u, encoder_v_s, encoder_v_v = torch.linalg.svd(encoder_v_original_weight)
-
-            approx_rank = rank
 
             # w_q_encoder
             # torch.Size([768, rank])
@@ -165,7 +166,7 @@ def dW_init_by_SVD(model, SVD_model, rank):
             w_v_encoder_loraB_weights.append(
                 torch.diag(encoder_v_s[:approx_rank]).sqrt() @ encoder_v_v[:approx_rank, :]
             )
-    og_weight = SVD_model.roberta.encoder.layer[0].attention.self.query.weight.data.T
+    og_weight = model_original.roberta.encoder.layer[0].attention.self.query.weight.data.T
     # insert_lora(SVD_model, 768, approx_rank, lora_alpha)
 
     with torch.no_grad():
@@ -197,7 +198,7 @@ def dW_init_by_SVD(model, SVD_model, rank):
     print(f"recon error between OG and rank_{approx_rank} SVD weight : {recon_error(og_weight,approx_weight):,} ")
 
 
-def dW_init_by_WplusAB(model, lora_model):
+def initialize_dW_with_W_add_loraAB(model, lora_model):
     len_of_layers = 12
     loraA_q_encoder_weight_list = []
     loraB_q_encoder_weight_list = []
@@ -233,7 +234,7 @@ def dW_init_by_WplusAB(model, lora_model):
             model.roberta.encoder.layer[i].attention.self.value.weight.copy_(encoder_v_plus_AB)
 
 
-def W_init_by_loraAB(model, lora_model):
+def initialize_W_with_loraAB(model, lora_model):
     """
     model의 W weight를 lora_model의 Lora Layer의 weight로 초기화
     """
@@ -604,15 +605,15 @@ def main():
 
     if model_args.ex_type == "lora_ft":
         """
-        Basic LoRA Fine-tuning
+        LoRA Fine-tuning
         기존 모든 weight fix 후 lora layer 추가해 학습
 
         이 떄, 기존 pretrained model의 acc 값과
         lora 삽입 후 acc 값이 같은지 확인해야 함
         """
-        insert_lora(model, 768, model_args.lora_r, model_args.lora_alpha)
-        W_weight_copy(model, new_model)
-    elif model_args.ex_type == "dW=WSVD":
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)
+    elif model_args.ex_type == "initialize_dW_with_svd":
         """
         dW, 즉 loraA, loraB를 W를 SVD 분해 한 뒤, 각 u@s.sqet, s.sqrt@vt를 넣어준다
         그 후 W=0으로 만들어주고 fix
@@ -620,13 +621,13 @@ def main():
         이 떄, SVD 분해 전 acc 값과
         분해 후 loraA,B에 대입한 후 값이 같아야 한다.
         """
-        insert_lora(model, 768, model_args.lora_r, model_args.lora_alpha)
-        W_weight_copy(model, new_model)
-        dW_init_by_SVD(model, new_model, model_args.lora_r)
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)
+        initialize_dW_with_svd(model, new_model, model_args.lora_r)
         make_W_zero(model)
-    elif model_args.ex_type == "W=dW_dw=new":
-        insert_lora(model, 768, model_args.lora_r, model_args.lora_alpha)
-        W_weight_copy(model, new_model)  # for bias
+    elif model_args.ex_type == "add_dW_to_W":
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)  # for bias
         lora_state_dict_fromdW = torch.load(model_args.lora_path)
         logger.info(f"Apply LoRA state dict from {model_args.lora_path}.")
         logger.info(lora_state_dict_fromdW.keys())
@@ -665,6 +666,9 @@ def main():
             value_loraB_aftertrain.append(
                 lora_state_dict_fromdW[f"roberta.encoder.layer.{i}.attention.self.value.lora_B"]
             )
+    elif model_args.ex_type == "make_w_zero_initialize_dW_with_zero":
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        make_W_zero(model)
 
     if model_args.apply_adapter:
         if model_args.adapter_path is not None:
@@ -849,15 +853,14 @@ def main():
             group=f"{model_args.ex_type}",
             name=f"{model_args.model_name_or_path}_RANK{model_args.lora_r}",
             config={
-                "learning_rate": 4e-4,
-                "num_train_epochs": 60,
+                "learning_rate": 9e-5,
+                "num_train_epochs": 30,
                 "batch_size": 64,
                 "lora_r": model_args.lora_r,
             },
         )
         config = wandb.config
         # trainer.add_callback(EarlyStoppingCallback(10))
-        # trainer.add_callback(integrations.WandbCallback())
 
         checkpoint = None
         if last_checkpoint is not None:
