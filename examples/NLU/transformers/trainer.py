@@ -113,7 +113,6 @@ from .utils import logging
 from .utils.modeling_auto_mapping import MODEL_FOR_QUESTION_ANSWERING_MAPPING_NAMES
 
 import loralib as lora
-import time
 
 _is_native_amp_available = False
 
@@ -1584,16 +1583,13 @@ class Trainer:
                 if state_dict is None:
                     state_dict = self.model.state_dict()
                 # torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
-        else:
-            pass
-            # self.model.save_pretrained(output_dir, state_dict=state_dict)
-        if self.tokenizer is not None:
-            pass
-            # self.tokenizer.save_pretrained(output_dir)
+        # else:
+        #     self.model.save_pretrained(output_dir, state_dict=state_dict)
+        # if self.tokenizer is not None:
+        #     self.tokenizer.save_pretrained(output_dir)
 
         # Good practice: save your training arguments together with the trained model
         # torch.save(self.args, os.path.join(output_dir, "training_args.bin"))
-
         print("##### SAVE LORA CKPT #####")
         now = time
         now_str = now.strftime("%Y-%m-%d_%H:%M")
@@ -1711,7 +1707,7 @@ class Trainer:
         self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
 
         self._memory_tracker.stop_and_update_metrics(output.metrics)
-        print("###########EVALUATE###########", output.metrics)
+
         return output.metrics
 
     def predict(
