@@ -299,7 +299,7 @@ class DataTrainingArguments:
         },
     )
     max_train_samples: Optional[int] = field(
-        default=1000,
+        default=None,
         metadata={
             "help": "For debugging purposes or quicker training, truncate the number of training examples to this "
             "value if set."
@@ -845,19 +845,19 @@ def main():
     if training_args.do_train:
         print("### START TRAIN ####", model)
 
-        # wandb.init(
-        #     group=f"{model_args.ex_type}",
-        #     name=f"{model_args.model_name_or_path}_RANK{model_args.lora_r}",
-        #     config={
-        #         "learning_rate": 4e-4,
-        #         "num_train_epochs": 60,
-        #         "batch_size": 64,
-        #         "lora_r": model_args.lora_r,
-        #     },
-        # )
-        trainer.add_callback(EarlyStoppingCallback(10))
+        wandb.init(
+            group=f"{model_args.ex_type}",
+            name=f"{model_args.model_name_or_path}_RANK{model_args.lora_r}",
+            config={
+                "learning_rate": 4e-4,
+                "num_train_epochs": 60,
+                "batch_size": 64,
+                "lora_r": model_args.lora_r,
+            },
+        )
+        config = wandb.config
+        # trainer.add_callback(EarlyStoppingCallback(10))
         # trainer.add_callback(integrations.WandbCallback())
-        # config = wandb.config
 
         checkpoint = None
         if last_checkpoint is not None:
@@ -881,27 +881,6 @@ def main():
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-        # print("### START EVAL ####")
-        # logger.info("*** Evaluate ***")
-
-        # # Loop to handle MNLI double evaluation (matched, mis-matched)
-        # tasks = [data_args.task_name]
-        # eval_datasets = [eval_dataset]
-        # if data_args.task_name == "mnli":
-        #     tasks.append("mnli-mm")
-        #     eval_datasets.append(datasets["validation_mismatched"])
-
-        # for eval_dataset, task in zip(eval_datasets, tasks):
-        #     metrics = trainer.evaluate(eval_dataset=eval_dataset)
-
-        #     max_val_samples = data_args.max_val_samples if data_args.max_val_samples is not None else len(eval_dataset)
-        #     metrics["eval_samples"] = min(max_val_samples, len(eval_dataset))
-
-        #     trainer.log_metrics("eval", metrics)
-        #     trainer.save_metrics("eval", metrics)
-        # print("METRICS")
-        # print(metrics["eval_accuracy"], metrics["eval_loss"])
-
     # Evaluation
     if training_args.do_eval:
         print("### START EVAL ####")
@@ -922,9 +901,9 @@ def main():
 
             trainer.log_metrics("eval", metrics)
             trainer.save_metrics("eval", metrics)
-        print("METRICS")
-        print(metrics["eval_accuracy"], metrics["eval_loss"])
-    wandb.log({"eval/accuracy": metrics["eval_accuracy"], "eval/loss": metrics["eval_loss"]})
+            print("METRICS")
+            print(metrics["eval_accuracy"], metrics["eval_loss"])
+        # wandb.log({"eval/accuracy": metrics["eval_accuracy"], "eval/loss": metrics["eval_loss"]})
 
     if training_args.do_predict:
         logger.info("*** Test ***")

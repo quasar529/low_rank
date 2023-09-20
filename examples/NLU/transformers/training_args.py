@@ -306,7 +306,7 @@ class TrainingArguments:
     )
 
     do_train: bool = field(default=False, metadata={"help": "Whether to run training."})
-    do_eval: bool = field(default=True, metadata={"help": "Whether to run eval on the dev set."})
+    do_eval: bool = field(default=None, metadata={"help": "Whether to run eval on the dev set."})
     do_predict: bool = field(default=False, metadata={"help": "Whether to run predictions on the test set."})
     evaluation_strategy: IntervalStrategy = field(
         default="epoch",
@@ -460,7 +460,7 @@ class TrainingArguments:
         metadata={"help": "Whether or not to load the best model found during training at the end of training."},
     )
     metric_for_best_model: Optional[str] = field(
-        default="eval_accuracy", metadata={"help": "The metric to use to compare two different models."}
+        default=None, metadata={"help": "The metric to use to compare two different models."}
     )
     greater_is_better: Optional[bool] = field(
         default=None, metadata={"help": "Whether the `metric_for_best_model` should be maximized or not."}
@@ -493,7 +493,7 @@ class TrainingArguments:
         metadata={"help": "Whether or not to group samples of roughly the same length together when batching."},
     )
     report_to: Optional[List[str]] = field(
-        default="wandb", metadata={"help": "The list of integrations to report the results and logs to."}
+        default=None, metadata={"help": "The list of integrations to report the results and logs to."}
     )
     ddp_find_unused_parameters: Optional[bool] = field(
         default=None,
