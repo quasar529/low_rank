@@ -1577,19 +1577,11 @@ class Trainer:
             if isinstance(unwrap_model(self.model), PreTrainedModel):
                 if state_dict is None:
                     state_dict = self.model.state_dict()
-                # unwrap_model(self.model).save_pretrained(output_dir, state_dict=state_dict)
             else:
                 logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
                 if state_dict is None:
                     state_dict = self.model.state_dict()
-                # torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
-        # else:
-        #     self.model.save_pretrained(output_dir, state_dict=state_dict)
-        # if self.tokenizer is not None:
-        #     self.tokenizer.save_pretrained(output_dir)
 
-        # Good practice: save your training arguments together with the trained model
-        # torch.save(self.args, os.path.join(output_dir, "training_args.bin"))
         print("##### SAVE LORA CKPT #####")
         now = time
         now_str = now.strftime("%Y-%m-%d_%H:%M")

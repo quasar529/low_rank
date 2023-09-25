@@ -1,7 +1,7 @@
 # export num_gpus=8
 # export CUBLAS_WORKSPACE_CONFIG=":16:8" # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
 # export PYTHONHASHSEED=0
-export output_dir="./sst2/w=0dw=random_r16"
+export output_dir="./sst2/w=0dw=random_r128"
 python /home/lab/bumjun/low_rank/examples/NLU/examples/text-classification/run_glue.py \
 --model_name_or_path textattack/roberta-base-SST-2 \
 --task_name sst2 \
@@ -9,7 +9,7 @@ python /home/lab/bumjun/low_rank/examples/NLU/examples/text-classification/run_g
 --do_eval \
 --max_seq_length 128 \
 --per_device_train_batch_size 64 \
---learning_rate 3e-5 \
+--learning_rate 9e-5 \
 --num_train_epochs 30 \
 --output_dir $output_dir/model \
 --logging_dir $output_dir/log \
@@ -18,8 +18,8 @@ python /home/lab/bumjun/low_rank/examples/NLU/examples/text-classification/run_g
 --evaluation_strategy epoch \
 --save_strategy epoch \
 --apply_lora \
---lora_r 16 \
---lora_alpha 16 \
+--lora_r 128 \
+--lora_alpha 128 \
 --seed 0 \
 --weight_decay 0.1 \
 --ex_type make_w_zero_initialize_dW_with_random

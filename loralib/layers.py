@@ -127,33 +127,11 @@ class Linear(nn.Linear, LoRALayer):
             nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             nn.init.zeros_(self.lora_B)
 
-    # def train(self, mode: bool = True):
-    #     def T(w):
-    #         return w.transpose(0, 1) if self.fan_in_fan_out else w
-    #     nn.Linear.train(self, mode)
-    #     if mode:
-    #         if self.merge_weights and self.merged:
-    #             # Make sure that the weights are not merged
-    #             if self.r > 0:
-    #                 self.weight.data -= T(self.lora_B @ self.lora_A) * self.scaling
-    #             self.merged = False
-    #     else:
-    #         if self.merge_weights and not self.merged:
-    #             # Merge the weights and mark it
-    #             if self.r > 0:
-    #                 self.weight.data += T(self.lora_B @ self.lora_A) * self.scaling
-    #             self.merged = True
     def train(self, mode: bool = True):
         def T(w):
             return w.T if self.fan_in_fan_out else w
 
         nn.Linear.train(self, mode)
-
-        # if self.merge_weights and self.merged:
-        #     # Make sure that the weights are not merged
-        #     if self.r > 0:
-        #         self.weight.data -= T(self.lora_B @ self.lora_A) * self.scaling
-        #     self.merged = False
 
     def eval(self):
         def T(w):
@@ -161,23 +139,7 @@ class Linear(nn.Linear, LoRALayer):
 
         nn.Linear.eval(self)
 
-        # if self.merge_weights and not self.merged:
-        #     # Merge the weights and mark it
-        #     if self.r > 0:
-        #         self.weight.data += T(self.lora_B @ self.lora_A) * self.scaling
-        #     self.merged = True
-
     def forward(self, x: torch.Tensor):
-        # def T(w):
-        #     return w.transpose(0, 1) if self.fan_in_fan_out else w
-
-        # if self.r > 0 and not self.merged:
-        #     result = F.linear(x, T(self.weight), bias=self.bias)
-        #     result += (self.lora_dropout(x) @ self.lora_A.transpose(0, 1) @ self.lora_B.transpose(0, 1)) * self.scaling
-        #     return result
-        # else:
-        #     return F.linear(x, T(self.weight), bias=self.bias)
-        print("LORA LINEAR")
         result = F.linear(x, (self.weight), bias=self.bias)
         result += x @ (self.lora_A.T @ self.lora_B.T) * self.scaling
 

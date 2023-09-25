@@ -942,7 +942,7 @@ def main():
             group=f"{model_args.ex_type}",
             name=f"{model_args.model_name_or_path}_RANK{model_args.lora_r}",
             config={
-                "learning_rate": 3e-5,
+                "learning_rate": 9e-5,
                 "num_train_epochs": 30,
                 "batch_size": 64,
                 "lora_r": model_args.lora_r,
