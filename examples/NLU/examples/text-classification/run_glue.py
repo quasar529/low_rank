@@ -202,11 +202,100 @@ def initialize_dW_with_svd(model, model_original, approx_rank):
     print(f"recon error between OG and rank_{approx_rank} SVD weight : {recon_error(og_weight,approx_weight):,} ")
 
 
+def initialize_dW_with_svd_r_to_2r(model, model_original, approx_rank):
+    w_q_encoder_loraA_weights = []
+    w_q_encoder_loraB_weights = []
+
+    w_v_encoder_loraA_weights = []
+    w_v_encoder_loraB_weights = []
+
+    len_of_layers = len(model.roberta.encoder.layer)  # len(SVD_model.roberta.encoder.layer)
+    with torch.no_grad():
+        for i in range(len_of_layers):
+            encoder_q_original_weight = model_original.roberta.encoder.layer[i].attention.self.query.weight.data.T
+            encoder_v_original_weight = model_original.roberta.encoder.layer[i].attention.self.value.weight.data.T
+
+            encoder_q_u, encoder_q_s, encoder_q_v = torch.linalg.svd(encoder_q_original_weight)
+            encoder_v_u, encoder_v_s, encoder_v_v = torch.linalg.svd(encoder_v_original_weight)
+
+            # w_q_encoder
+            # torch.Size([768, rank])
+            w_q_encoder_loraA_weights.append(
+                encoder_q_u[:, approx_rank + 1 : approx_rank + approx_rank]
+                @ torch.diag(encoder_q_s[:approx_rank]).sqrt()
+            )
+            # torch.Size([rank, 768])
+            w_q_encoder_loraB_weights.append(
+                torch.diag(encoder_q_s[approx_rank + 1 : approx_rank + approx_rank]).sqrt()
+                @ encoder_q_v[approx_rank + 1 : approx_rank + approx_rank, :]
+            )
+            # w_v_encoder
+            w_v_encoder_loraA_weights.append(
+                encoder_v_u[:, approx_rank + 1 : approx_rank + approx_rank]
+                @ torch.diag(encoder_v_s[approx_rank + 1 : approx_rank + approx_rank]).sqrt()
+            )
+            w_v_encoder_loraB_weights.append(
+                torch.diag(encoder_v_s[approx_rank + 1 : approx_rank + approx_rank]).sqrt()
+                @ encoder_v_v[approx_rank + 1 : approx_rank + approx_rank, :]
+            )
+
+    with torch.no_grad():
+        for i in range(len_of_layers):
+            model.roberta.encoder.layer[i].attention.self.query.lora_A.copy_(
+                w_q_encoder_loraA_weights[i].transpose(0, 1)
+            )
+            model.roberta.encoder.layer[i].attention.self.query.lora_B.copy_(
+                w_q_encoder_loraB_weights[i].transpose(0, 1)
+            )
+
+            model.roberta.encoder.layer[i].attention.self.value.lora_A.copy_(
+                w_v_encoder_loraA_weights[i].transpose(0, 1)
+            )
+            model.roberta.encoder.layer[i].attention.self.value.lora_B.copy_(
+                w_v_encoder_loraB_weights[i].transpose(0, 1)
+            )
+
+
+def initialize_dW_A_with_svd(model, model_original, approx_rank):
+    w_q_encoder_loraA_weights = []
+    w_v_encoder_loraA_weights = []
+
+    len_of_layers = len(model.roberta.encoder.layer)
+    with torch.no_grad():
+        for i in range(len_of_layers):
+            encoder_q_original_weight = model_original.roberta.encoder.layer[i].attention.self.query.weight.data.T
+            encoder_v_original_weight = model_original.roberta.encoder.layer[i].attention.self.value.weight.data.T
+
+            encoder_q_u, encoder_q_s, encoder_q_v = torch.linalg.svd(encoder_q_original_weight)
+            encoder_v_u, encoder_v_s, encoder_v_v = torch.linalg.svd(encoder_v_original_weight)
+
+            # w_q_encoder
+            # torch.Size([768, rank])
+            w_q_encoder_loraA_weights.append(
+                encoder_q_u[:, :approx_rank] @ torch.diag(encoder_q_s[:approx_rank]).sqrt()
+            )
+
+            # w_v_encoder
+            w_v_encoder_loraA_weights.append(
+                encoder_v_u[:, :approx_rank] @ torch.diag(encoder_v_s[:approx_rank]).sqrt()
+            )
+
+    with torch.no_grad():
+        for i in range(len_of_layers):
+            model.roberta.encoder.layer[i].attention.self.query.lora_A.copy_(
+                w_q_encoder_loraA_weights[i].transpose(0, 1)
+            )
+
+            model.roberta.encoder.layer[i].attention.self.value.lora_A.copy_(
+                w_v_encoder_loraA_weights[i].transpose(0, 1)
+            )
+
+
 def initialize_W_with_loraAB(model, lora_model):
     """
     model의 W weight를 lora_model의 Lora Layer의 weight로 초기화
     """
-    len_of_layers = 12
+    len_of_layers = len(model.roberta.encoder.layer)
     loraA_q_encoder_weight_list = []
     loraB_q_encoder_weight_list = []
 
@@ -307,6 +396,28 @@ def initialize_dW_with_random(model):
             nn.init.kaiming_uniform_(model.roberta.encoder.layer[i].attention.self.query.lora_B, a=math.sqrt(5))
             nn.init.kaiming_uniform_(model.roberta.encoder.layer[i].attention.self.value.lora_A, a=math.sqrt(5))
             nn.init.kaiming_uniform_(model.roberta.encoder.layer[i].attention.self.value.lora_B, a=math.sqrt(5))
+
+
+def load_lora_ckpt_to_roberta(model, lora_path):
+    lora_dict = torch.load(lora_path)
+    len_of_layers = len(model.roberta.encoder.layer)
+    for i in range(len_of_layers):
+        model.roberta.encoder.layer[i].attention.self.query.lora_A = copy.deepcopy(
+            nn.Parameter(lora_dict[f"roberta.encoder.layer.{i}.attention.self.query.lora_A"])
+        )
+        model.roberta.encoder.layer[i].attention.self.query.lora_B = copy.deepcopy(
+            nn.Parameter(lora_dict[f"roberta.encoder.layer.{i}.attention.self.query.lora_B"])
+        )
+        model.roberta.encoder.layer[i].attention.self.value.lora_A = copy.deepcopy(
+            nn.Parameter(lora_dict[f"roberta.encoder.layer.{i}.attention.self.value.lora_A"])
+        )
+        model.roberta.encoder.layer[i].attention.self.value.lora_B = copy.deepcopy(
+            nn.Parameter(lora_dict[f"roberta.encoder.layer.{i}.attention.self.value.lora_B"])
+        )
+        model.classifier.dense.weight = nn.Parameter(copy.deepcopy(lora_dict["classifier.dense.weight"]))
+        model.classifier.dense.bias = nn.Parameter(copy.deepcopy(lora_dict["classifier.dense.bias"]))
+        model.classifier.out_proj.weight = nn.Parameter(copy.deepcopy(lora_dict["classifier.out_proj.weight"]))
+        model.classifier.out_proj.bias = nn.Parameter(copy.deepcopy(lora_dict["classifier.out_proj.bias"]))
 
 
 @dataclass
@@ -521,6 +632,9 @@ def main():
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
+    # training_args.load_best_model_at_end = True
+    # training_args.metric_for_best_model = "accuracy"
+    # training_args.save_total_limit = 2
 
     # Get the datasets: you can either provide your own CSV/JSON training and evaluation files (see below)
     # or specify a GLUE benchmark task (the dataset will be downloaded automatically from the datasets Hub).
@@ -652,11 +766,19 @@ def main():
         이 떄, 기존 pretrained model의 acc 값과
         lora 삽입 후 acc 값이 같은지 확인해야 함
         """
+        print("EX TYPE: ft_with_lora")
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
         copy_weights(model, new_model)
+
+    elif model_args.ex_type == "LoRA_ckpt":
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)
+        model.load_state_dict(torch.load(model_args.lora_path), strict=False)
+
     elif model_args.ex_type == "initialize_dW_with_svd":
         """
-        dW, 즉 loraA, loraB를 W를 SVD 분해 한 뒤, 각 u@s.sqet, s.sqrt@vt를 넣어준다
+        make W Zero
+        dW, 즉 loraA, loraB에 W를 SVD 분해 한 뒤, 각 u@s.sqet, s.sqrt@vt를 넣어준다
         그 후 W=0으로 만들어주고 fix
 
         이 떄, SVD 분해 전 acc 값과
@@ -666,12 +788,35 @@ def main():
         copy_weights(model, new_model)
         initialize_dW_with_svd(model, new_model, model_args.lora_r)
         make_W_zero(model)
+    elif model_args.ex_type == "initialize_dW_with_svd_r_to_2r":
+        """
+        fix W
+        initialize dW with svd, 단 r+1 ~ 2r 사용
+        """
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)
+        initialize_dW_with_svd_r_to_2r(model, new_model, model_args.lora_r)
+    elif model_args.ex_type == "initialize_dW_A_with_svd":
+        """
+        fix W
+        LoRA layer 중 A 만 initialize
+        """
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)
+        initialize_dW_A_with_svd(model, new_model, model_args.lora_r)
+
+    elif model_args.ex_type == "initialize_dW_with_svd_fix_W":
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)
+        initialize_dW_with_svd(model, new_model, model_args.lora_r)
+
     elif model_args.ex_type == "initialize_W_with_loraAB":
         """
         W=dW, dW=new lora
         """
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
         copy_weights(model, new_model)  # for bias
+        model.load_state_dict(torch.load(model_args.lora_path), strict=False)
         lora_state_dict_fromdW = torch.load(model_args.lora_path)
         logger.info(f"Apply LoRA state dict from {model_args.lora_path}.")
         logger.info(lora_state_dict_fromdW.keys())
@@ -690,33 +835,13 @@ def main():
                     @ lora_state_dict_fromdW[f"roberta.encoder.layer.{i}.attention.self.value.lora_B"].T
                 ).T
             )
-        """
-        lora weight 변화 확인 용
-        """
-        # query_loraA_aftertrain = []
-        # query_loraB_aftertrain = []
-        # value_loraA_aftertrain = []
-        # value_loraB_aftertrain = []
-        # query_r128_loraA_beforetrain = []
-        # value_r128_loraA_beforetrain = []
-        # for i in range(12):
-        #     query_loraA_aftertrain.append(
-        #         lora_state_dict_fromdW[f"roberta.encoder.layer.{i}.attention.self.query.lora_A"]
-        #     )
-        #     query_loraB_aftertrain.append(
-        #         lora_state_dict_fromdW[f"roberta.encoder.layer.{i}.attention.self.query.lora_B"]
-        #     )
-        #     value_loraA_aftertrain.append(
-        #         lora_state_dict_fromdW[f"roberta.encoder.layer.{i}.attention.self.value.lora_A"]
-        #     )
-        #     value_loraB_aftertrain.append(
-        #         lora_state_dict_fromdW[f"roberta.encoder.layer.{i}.attention.self.value.lora_B"]
-        #     )
+
     elif model_args.ex_type == "make_w_zero_initialize_dW_with_random":
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
         make_W_zero(model)
         initialize_dW_with_random(model)
         print(model.roberta.encoder.layer[0].attention.self.query.lora_B)
+
     elif model_args.ex_type == "initialize_W_with_random_matrix_initialize_dW_with_svd":
         print("BEFORE QUERY WEIGHT", model.roberta.encoder.layer[0].attention.self.query.weight)
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
@@ -750,15 +875,11 @@ def main():
                 ).T
             )
         initialize_dW_with_svd(model, new_model, model_args.lora_r)
-        # og_weight = new_model.roberta.encoder.layer[0].attention.self.query.weight.data.T
-        # print(
-        #     recon_error(
-        #         og_weight,
-        #         model.roberta.encoder.layer[0].attention.self.query.lora_A.T
-        #         @ model.roberta.encoder.layer[0].attention.self.query.lora_B.T,
-        #     )
-        # )
 
+    elif model_args.ex_type == "fix_W_initialize_dW_with_svd":
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)
+        initialize_dW_with_svd(model, new_model, model_args.lora_r)
     if model_args.apply_adapter:
         if model_args.adapter_path is not None:
             adapter_state_dict = torch.load(os.path.join(model_args.adapter_path, "pytorch_adapter.bin"))
@@ -798,12 +919,16 @@ def main():
                         print(f"Trainalble LAYER NAME from LoRA : {name}")
                         break
             else:
+                # """
+                # textattack/roberta-base-SST-2의 CL Layer가 이미 sst2에 맞게 학습되었기 때문에 fix
+                # """
+                # param.requires_grad = False
+                # print(f"Make CL Layer untrainable : {name}")
                 """
-                textattack/roberta-base-SST-2의 CL Layer가 이미 sst2에 맞게 학습되었기 때문에 fix
+                roberta-base는 CL 학습해야한다
                 """
-                param.requires_grad = False
-                print(f"Make CL Layer untrainable : {name}")
-                # param.requires_grad = True
+                param.requires_grad = True
+                print(f"Make CL Layer trainable : {name}")
 
     print(f"PARAMETERS : {count_parameters(model):,}")
 
@@ -939,12 +1064,11 @@ def main():
         print("### START TRAIN ####", model)
 
         wandb.init(
-            group=f"{model_args.ex_type}",
-            name=f"{model_args.model_name_or_path}_RANK{model_args.lora_r}",
+            group=f"{data_args.task_name}",
+            name=f"{model_args.ex_type}_RANK{model_args.lora_r}_{model_args.model_name_or_path}",
             config={
-                "learning_rate": 9e-5,
-                "num_train_epochs": 30,
-                "batch_size": 64,
+                "learning_rate": 4e-4,
+                "batch_size": 32,
                 "lora_r": model_args.lora_r,
             },
         )
@@ -993,8 +1117,8 @@ def main():
 
             trainer.log_metrics("eval", metrics)
             trainer.save_metrics("eval", metrics)
-            print("METRICS")
-            print(metrics["eval_accuracy"], metrics["eval_loss"])
+            # print("METRICS")
+            # print(metrics["eval_accuracy"], metrics["eval_loss"])
         # wandb.log({"eval/accuracy": metrics["eval_accuracy"], "eval/loss": metrics["eval_loss"]})
 
     if training_args.do_predict:
