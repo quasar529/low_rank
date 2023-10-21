@@ -1,4 +1,4 @@
-export output_dir="./cola_initialize_dW_with_svd"
+export output_dir="./cola_initialize_dW_B_with_svd"
 python examples/text-classification/run_glue.py \
 --model_name_or_path roberta-base \
 --task_name cola \
@@ -20,4 +20,4 @@ python examples/text-classification/run_glue.py \
 --lora_alpha 16 \
 --seed 0 \
 --weight_decay 0.1 \
---ex_type initialize_dW_with_svd
+--ex_type initialize_dW_B_with_svd

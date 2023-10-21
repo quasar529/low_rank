@@ -221,22 +221,22 @@ def initialize_dW_with_svd_r_to_2r(model, model_original, approx_rank):
             # w_q_encoder
             # torch.Size([768, rank])
             w_q_encoder_loraA_weights.append(
-                encoder_q_u[:, approx_rank + 1 : approx_rank + approx_rank]
-                @ torch.diag(encoder_q_s[:approx_rank]).sqrt()
+                encoder_q_u[:, approx_rank : approx_rank + approx_rank]
+                @ torch.diag(encoder_q_s[approx_rank : approx_rank + approx_rank]).sqrt()
             )
             # torch.Size([rank, 768])
             w_q_encoder_loraB_weights.append(
-                torch.diag(encoder_q_s[approx_rank + 1 : approx_rank + approx_rank]).sqrt()
-                @ encoder_q_v[approx_rank + 1 : approx_rank + approx_rank, :]
+                torch.diag(encoder_q_s[approx_rank : approx_rank + approx_rank]).sqrt()
+                @ encoder_q_v[approx_rank : approx_rank + approx_rank, :]
             )
             # w_v_encoder
             w_v_encoder_loraA_weights.append(
-                encoder_v_u[:, approx_rank + 1 : approx_rank + approx_rank]
-                @ torch.diag(encoder_v_s[approx_rank + 1 : approx_rank + approx_rank]).sqrt()
+                encoder_v_u[:, approx_rank : approx_rank + approx_rank]
+                @ torch.diag(encoder_v_s[approx_rank : approx_rank + approx_rank]).sqrt()
             )
             w_v_encoder_loraB_weights.append(
-                torch.diag(encoder_v_s[approx_rank + 1 : approx_rank + approx_rank]).sqrt()
-                @ encoder_v_v[approx_rank + 1 : approx_rank + approx_rank, :]
+                torch.diag(encoder_v_s[approx_rank : approx_rank + approx_rank]).sqrt()
+                @ encoder_v_v[approx_rank : approx_rank + approx_rank, :]
             )
 
     with torch.no_grad():
@@ -288,6 +288,39 @@ def initialize_dW_A_with_svd(model, model_original, approx_rank):
 
             model.roberta.encoder.layer[i].attention.self.value.lora_A.copy_(
                 w_v_encoder_loraA_weights[i].transpose(0, 1)
+            )
+
+
+def initialize_dW_B_with_svd(model, model_original, approx_rank):
+    w_q_encoder_loraB_weights = []
+    w_v_encoder_loraB_weights = []
+
+    len_of_layers = len(model.roberta.encoder.layer)  # len(SVD_model.roberta.encoder.layer)
+    with torch.no_grad():
+        for i in range(len_of_layers):
+            encoder_q_original_weight = model_original.roberta.encoder.layer[i].attention.self.query.weight.data.T
+            encoder_v_original_weight = model_original.roberta.encoder.layer[i].attention.self.value.weight.data.T
+
+            encoder_q_u, encoder_q_s, encoder_q_v = torch.linalg.svd(encoder_q_original_weight)
+            encoder_v_u, encoder_v_s, encoder_v_v = torch.linalg.svd(encoder_v_original_weight)
+
+            # torch.Size([rank, 768])
+            w_q_encoder_loraB_weights.append(
+                torch.diag(encoder_q_s[:approx_rank]).sqrt() @ encoder_q_v[:approx_rank, :]
+            )
+
+            w_v_encoder_loraB_weights.append(
+                torch.diag(encoder_v_s[:approx_rank]).sqrt() @ encoder_v_v[:approx_rank, :]
+            )
+
+    with torch.no_grad():
+        for i in range(len_of_layers):
+            model.roberta.encoder.layer[i].attention.self.query.lora_B.copy_(
+                w_q_encoder_loraB_weights[i].transpose(0, 1)
+            )
+
+            model.roberta.encoder.layer[i].attention.self.value.lora_B.copy_(
+                w_v_encoder_loraB_weights[i].transpose(0, 1)
             )
 
 
@@ -769,7 +802,7 @@ def main():
         print("EX TYPE: ft_with_lora")
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
         copy_weights(model, new_model)
-
+    
     elif model_args.ex_type == "LoRA_ckpt":
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
         copy_weights(model, new_model)
@@ -804,6 +837,15 @@ def main():
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
         copy_weights(model, new_model)
         initialize_dW_A_with_svd(model, new_model, model_args.lora_r)
+
+    elif model_args.ex_type == "initialize_dW_B_with_svd":
+        """
+        fix W
+        LoRA layer 중 A 만 initialize
+        """
+        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        copy_weights(model, new_model)
+        initialize_dW_B_with_svd(model, new_model, model_args.lora_r)
 
     elif model_args.ex_type == "initialize_dW_with_svd_fix_W":
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)

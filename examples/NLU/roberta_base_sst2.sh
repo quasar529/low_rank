@@ -1,7 +1,7 @@
 # export num_gpus=8
 # export CUBLAS_WORKSPACE_CONFIG=":16:8" # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
 # export PYTHONHASHSEED=0
-export output_dir="./sst2/roberta-base_fix_W_initialize_dW_A_with_svd"
+export output_dir="./sst2/roberta-base_fix_W_initialize_dW_with_svd_r_to_2r"
 python /home/lab/bumjun/low_rank/examples/NLU/examples/text-classification/run_glue.py \
 --model_name_or_path roberta-base \
 --task_name sst2 \
@@ -22,7 +22,7 @@ python /home/lab/bumjun/low_rank/examples/NLU/examples/text-classification/run_g
 --lora_alpha 8 \
 --seed 0 \
 --weight_decay 0.1 \
---ex_type initialize_dW_A_with_svd
+--ex_type initialize_dW_with_svd_r_to_2r
 #--warmup_ratio 0.06 \
 #--lora_path /home/lab/bumjun/low_rank/examples/NLU/sst2/r16/model/checkpoint-480/pytorch_model.bin \
 # --output_dir $output_dir/model \./sst2/eval_test/model
