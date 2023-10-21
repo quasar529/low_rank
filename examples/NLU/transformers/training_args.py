@@ -309,7 +309,7 @@ class TrainingArguments:
     do_eval: bool = field(default=None, metadata={"help": "Whether to run eval on the dev set."})
     do_predict: bool = field(default=False, metadata={"help": "Whether to run predictions on the test set."})
     evaluation_strategy: IntervalStrategy = field(
-        default="no",
+        default="epoch",
         metadata={"help": "The evaluation strategy to use."},
     )
     prediction_loss_only: bool = field(
@@ -510,7 +510,9 @@ class TrainingArguments:
     )
     _n_gpu: int = field(init=False, repr=False, default=-1)
     cls_dropout: Optional[float] = field(default=None, metadata={"help": "cls drop out."})
-    use_deterministic_algorithms: Optional[bool] = field(default=False, metadata={"help": "Whether or not to use deterministic algorithms."})
+    use_deterministic_algorithms: Optional[bool] = field(
+        default=False, metadata={"help": "Whether or not to use deterministic algorithms."}
+    )
 
     def __post_init__(self):
         # expand paths, if not os.makedirs("~/bar") will make directory

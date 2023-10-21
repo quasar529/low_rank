@@ -133,3 +133,15 @@ post/
 *.nupkg
 /Packages
 
+/examples/NLU/wandb/
+/examples/NLU/output/
+/examples/NLU/runs/
+/examples/NLU/sst2*
+/examples/NLU/rte
+/examples/NLU/cola*
+/examples/NLU/mrpc
+/examples/NLU/qqp
+/examples/NLU/qnli
+/examples/NLU/wnli
+/examples/NLU/mlruns
+/examples/NLU/LoRA_ckpt_from_repo

@@ -1,15 +1,14 @@
-export num_gpus=8
-export CUBLAS_WORKSPACE_CONFIG=":16:8" # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
-export PYTHONHASHSEED=0
+# export num_gpus=8
+# export CUBLAS_WORKSPACE_CONFIG=":16:8" # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+# export PYTHONHASHSEED=0
 export output_dir="./cola"
-python -m torch.distributed.launch --nproc_per_node=$num_gpus \
-examples/text-classification/run_glue.py \
+python examples/text-classification/run_glue.py \
 --model_name_or_path roberta-large \
 --task_name cola \
 --do_train \
 --do_eval \
 --max_seq_length 128 \
---per_device_train_batch_size 4 \
+--per_device_train_batch_size 8 \
 --learning_rate 3e-4 \
 --num_train_epochs 20 \
 --output_dir $output_dir/model \
@@ -22,4 +21,5 @@ examples/text-classification/run_glue.py \
 --lora_r 8 \
 --lora_alpha 16 \
 --seed 0 \
---weight_decay 0.1
+--weight_decay 0.1 \
+--ex_type ft_with_lora

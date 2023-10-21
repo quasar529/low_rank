@@ -1,15 +1,12 @@
-export num_gpus=8
-export CUBLAS_WORKSPACE_CONFIG=":16:8" # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
-export PYTHONHASHSEED=0
+
 export output_dir="./qqp"
-python -m torch.distributed.launch --nproc_per_node=$num_gpus \
-examples/text-classification/run_glue.py \
+python examples/text-classification/run_glue.py \
 --model_name_or_path roberta-base \
 --task_name qqp \
 --do_train \
 --do_eval \
---max_seq_length 512 \
---per_device_train_batch_size 16 \
+--max_seq_length 256 \
+--per_device_train_batch_size 32 \
 --learning_rate 5e-4 \
 --num_train_epochs 25 \
 --output_dir $output_dir/model \
