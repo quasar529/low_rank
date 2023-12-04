@@ -47,7 +47,17 @@ from transformers import (
 )
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.utils import check_min_version
-
+from peft import (
+    get_peft_config,
+    get_peft_model,
+    get_peft_model_state_dict,
+    set_peft_model_state_dict,
+    LoraConfig,
+    PeftType,
+    PrefixTuningConfig,
+    PromptEncoderConfig,
+    prepare_model_for_kbit_training,
+)
 import wandb
 from wandb import AlertLevel
 import loralib as lora
@@ -83,7 +93,7 @@ def recon_error(original_weight, approx_weight):
 
 
 def add_lora_to_roberta(model, dim, rank, lora_alpha):
-    len_of_layers = len(model.roberta.encoder.layer)  # len(model.roberta.encoder)
+    len_of_layers = len(model.roberta.encoder.layer)
     for i in range(len_of_layers):
         model.roberta.encoder.layer[i].attention.self.query = copy.deepcopy(
             lora.Linear(dim, dim, r=rank, lora_alpha=lora_alpha, merge_weights=False)
@@ -800,9 +810,14 @@ def main():
         lora 삽입 후 acc 값이 같은지 확인해야 함
         """
         print("EX TYPE: ft_with_lora")
-        add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
-        copy_weights(model, new_model)
-    
+        # add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
+        # copy_weights(model, new_model)
+        model.gradient_checkpointing_enable()
+        model = prepare_model_for_kbit_training(model)
+
+        config = LoraConfig(r=8, lora_alpha=8, target_modules=["query_proj", "value_proj"], task_type="SEQ_CLS")
+        model = get_peft_model(model, config)
+
     elif model_args.ex_type == "LoRA_ckpt":
         add_lora_to_roberta(model, 768, model_args.lora_r, model_args.lora_alpha)
         copy_weights(model, new_model)
