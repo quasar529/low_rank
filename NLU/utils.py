@@ -23,7 +23,7 @@ from transformers import EvalPrediction
 #         result["combined_score"] = np.mean(list(result.values())).item()
 #     return result
 def compute_metrics(eval_pred):
-    metric = load_metric("glue", "cola")
+    metric = load_metric("glue", "mrpc")
     predictions, labels = eval_pred
     predictions = predictions.argmax(axis=-1)
     return metric.compute(predictions=predictions, references=labels)

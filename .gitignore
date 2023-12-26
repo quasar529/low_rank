@@ -145,3 +145,6 @@ post/
 /examples/NLU/wnli
 /examples/NLU/mlruns
 /examples/NLU/LoRA_ckpt_from_repo
+
+/NLU/output
+/NLU/wandb

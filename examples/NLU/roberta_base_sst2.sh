@@ -8,7 +8,7 @@ python /home/lab/bumjun/low_rank/examples/NLU/examples/text-classification/run_g
 --do_train \
 --do_eval \
 --max_seq_length 128 \
---per_device_train_batch_size 64 \
+--per_device_train_batch_size 32 \
 --learning_rate 4e-4 \
 --num_train_epochs 60 \
 --output_dir $output_dir/model \

@@ -52,11 +52,11 @@ from datasets import load_dataset
 from utils import compute_metrics, print_trainable_parameters
 import loralib as lora
 
-MODEL_SAVE_REPO = "MayIBorn/cola-deberta_initialize_dW_with_span-rank16"
+MODEL_SAVE_REPO = "MayIBorn/rte-normal"
 HUGGINGFACE_AUTH_TOKEN = "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"
 
-os.environ["WANDB_PROJECT"] = "DeBERTaV2_CoLA"
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+os.environ["WANDB_PROJECT"] = "Deberta_NLU"
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"  # ":4096:8"
 
 
 def seed_everything(seed: int = 42):
@@ -66,11 +66,11 @@ def seed_everything(seed: int = 42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)  # type: ignore
     torch.backends.cudnn.deterministic = True  # type: ignore
-    torch.backends.cudnn.benchmark = False  # type: ignore
-    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.benchmark = True  # type: ignore
+    # torch.use_deterministic_algorithms(True)
 
 
-seed_everything(42)
+seed_everything(0)
 
 
 def add_lora_to_deberta(model, dim, rank, lora_alpha):
@@ -113,7 +113,7 @@ def copy_weights_to_deberta(model, W_model):
             model.deberta.encoder.layer[i].attention.self.value_proj.bias.data.copy_(v_encoder_bias_list[i])
 
 
-def deberta_initialize_dW_with_svd(model, model_original, approx_rank):
+def deberta_init_dW_with_svd(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
     q_proj_v_loraB_weights = []
@@ -153,7 +153,7 @@ def deberta_initialize_dW_with_svd(model, model_original, approx_rank):
             )
 
 
-def deberta_initialize_dW_A_with_svd(model, model_original, approx_rank):
+def deberta_init_dW_A_with_svd(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
 
@@ -183,7 +183,7 @@ def deberta_initialize_dW_A_with_svd(model, model_original, approx_rank):
             )
 
 
-def initialize_dW_A_with_svd_inv(model, model_original, approx_rank):
+def init_dW_A_with_svd_inv(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
 
@@ -217,7 +217,7 @@ def initialize_dW_A_with_svd_inv(model, model_original, approx_rank):
             )
 
 
-def deberta_initialize_dW_B_with_svd(model, model_original, approx_rank):
+def deberta_init_dW_B_with_svd(model, model_original, approx_rank):
     q_proj_v_loraB_weights = []
     k_proj_v_loraB_weights = []
 
@@ -246,7 +246,7 @@ def deberta_initialize_dW_B_with_svd(model, model_original, approx_rank):
             )
 
 
-def deberta_initialize_dW_with_svd_from_back(model, model_original, approx_rank):
+def deberta_init_dW_with_svd_from_back(model, model_original, approx_rank):
     q_proj_v_loraB_weights = []
     k_proj_v_loraB_weights = []
     q_proj_v_loraA_weights = []
@@ -284,7 +284,7 @@ def deberta_initialize_dW_with_svd_from_back(model, model_original, approx_rank)
             )
 
 
-def deberta_initialize_dW_A_with_svd_from_back(model, model_original, approx_rank):
+def deberta_init_dW_A_with_svd_from_back(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
     len_of_layers = len(model_original.deberta.encoder.layer)
@@ -311,7 +311,7 @@ def deberta_initialize_dW_A_with_svd_from_back(model, model_original, approx_ran
             )
 
 
-def deberta_initialize_dW_B_with_svd_from_back(model, model_original, approx_rank):
+def deberta_init_dW_B_with_svd_from_back(model, model_original, approx_rank):
     q_proj_v_loraB_weights = []
     k_proj_v_loraB_weights = []
     len_of_layers = len(model_original.deberta.encoder.layer)
@@ -338,7 +338,7 @@ def deberta_initialize_dW_B_with_svd_from_back(model, model_original, approx_ran
             )
 
 
-def deberta_initialize_dW_B_with_svd_from_back_dW_A_zero(model, model_original, approx_rank):
+def deberta_init_dW_B_with_svd_from_back_dW_A_zero(model, model_original, approx_rank):
     q_proj_v_loraB_weights = []
     k_proj_v_loraB_weights = []
     len_of_layers = len(model_original.deberta.encoder.layer)
@@ -367,7 +367,7 @@ def deberta_initialize_dW_B_with_svd_from_back_dW_A_zero(model, model_original, 
             nn.init.zeros_(model.deberta.encoder.layer[i].attention.self.value_proj.lora_A.default.weight.data)
 
 
-def deberta_initialize_dW_A_with_svd_selectively_from_back(model, model_original, approx_rank):
+def deberta_init_dW_A_with_svd_selectively_from_back(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
     len_of_layers = len(model_original.deberta.encoder.layer)
@@ -400,7 +400,7 @@ def deberta_initialize_dW_A_with_svd_selectively_from_back(model, model_original
             )
 
 
-def deberta_initialize_dW_A_with_svd_from_back_with_scaling(model, model_original, approx_rank):
+def deberta_init_dW_A_with_svd_from_back_with_scaling(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
     len_of_layers = len(model_original.deberta.encoder.layer)
@@ -471,7 +471,7 @@ def deberta_initialize_dW_A_with_svd_from_back_with_scaling(model, model_origina
             )
 
 
-def deberta_initialize_dW_A_with_svd_from_back_with_scaling_entire(model, model_original, approx_rank):
+def deberta_init_dW_A_with_svd_from_back_with_scaling_entire(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
     len_of_layers = len(model_original.deberta.encoder.layer)
@@ -523,7 +523,7 @@ def deberta_initialize_dW_A_with_svd_from_back_with_scaling_entire(model, model_
             )
 
 
-def deberta_initialize_dW_B_with_svd_from_back_with_scaling_entire(model, model_original, approx_rank):
+def deberta_init_dW_B_with_svd_from_back_with_scaling_entire(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
     len_of_layers = len(model_original.deberta.encoder.layer)
@@ -575,7 +575,7 @@ def deberta_initialize_dW_B_with_svd_from_back_with_scaling_entire(model, model_
             )
 
 
-def initialize_dW_with_svd_from_back_with_scaling_A_Only(model, model_original, approx_rank):
+def init_dW_with_svd_from_back_with_scaling_A_Only(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
     q_proj_v_loraB_weights = []
@@ -640,7 +640,7 @@ def initialize_dW_with_svd_from_back_with_scaling_A_Only(model, model_original, 
             )
 
 
-def deberta_initialize_dW_with_span(model, model_original, approx_rank):
+def deberta_init_dW_with_span(model, model_original, approx_rank):
     model.cpu()
     model_original.cpu()
     len_of_layers = len(model_original.deberta.encoder.layer)
@@ -690,14 +690,14 @@ def deberta_initialize_dW_with_span(model, model_original, approx_rank):
         ].attention.self.value_proj.lora_A.default.weight.data = v_loraA_tensor.contiguous()
 
 
-def deberta_initialize_dW_B_with_svd_by_head(model, approx_rank):
+def deberta_init_dW_B_with_svd_by_head(model, approx_rank):
     len_of_layers = len(model.base_model.model.deberta.encoder.layer)
     for i in range(len_of_layers):
         q_loraB_head_list = []
         v_loraB_head_list = []
 
-        q_weight = model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.weight
-        v_weight = model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.weight
+        q_weight = model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.weight.T
+        v_weight = model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.weight.T
 
         all_q_head = copy.deepcopy(q_weight)
         all_q_head = all_q_head.view(24, 1536, 64)
@@ -742,12 +742,35 @@ def deberta_initialize_dW_B_with_svd_by_head(model, approx_rank):
         print(f"Complete init LoraB! layer: {i}, q_loraB: {q_loraB.shape}, v_loraB: {v_loraB.shape}")
 
 
+class CustomTrainer(Trainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.train_label_distribution = []
+        self.eval_label_distribution = []
+
+    def training_step(self, model, inputs):
+        count_0 = torch.bincount(inputs["labels"])[0]
+        count_1 = torch.bincount(inputs["labels"])[1]
+        self.train_label_distribution.append((count_0, count_1))
+        print(f"Training Label 0 : {count_0},   Label 1: {count_1}")
+        return super().training_step(model, inputs)
+
+    def evaluation_step(self, model, inputs):
+        count_0 = torch.bincount(inputs["labels"])[0]
+        count_1 = torch.bincount(inputs["labels"])[1]
+        self.eval_label_distribution.append((count_0, count_1))
+        print(f"Evaluation - Label 0 : {count_0}, Label 1: {count_1}")
+        return super().evaluation
+
+
 def train():
-    task_name = "cola"
-    max_seq_length = 64
-    model_id = "microsoft/deberta-v2-xxlarge"
     datetime = time.strftime("%Y_%m_%d_%H_%M", time.localtime(time.time()))
-    output_dir = f"./NLU/{datetime}"
+    task_name = "mrpc"
+    max_seq_length = 128
+
+    model_id = "microsoft/deberta-v2-xxlarge"
+    exp_name = "normal_fp16"
+    output_dir = f"./output/{exp_name}_{datetime[5:10]}"
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -818,54 +841,33 @@ def train():
 
     dataset_ = dataset.map(preprocess_function, batched=True, load_from_cache_file=not False)
 
-    dataset = load_dataset("glue", "cola")
-
-    # 데이터셋 전처리
-    def encode(example):
-        return tokenizer(example["sentence"], truncation=True, padding="max_length")
-
-    encoded_dataset = dataset.map(encode, batched=True, load_from_cache_file=not False)
     train_dataset = dataset_["train"]
     val_dataset = dataset_["validation"]
     test_dataset = dataset_["test"]
 
-    # QLORA
-    # bnb_config = BitsAndBytesConfig(
-    #     load_in_4bit=True,
-    #     bnb_4bit_use_double_quant=True,
-    #     bnb_4bit_quant_type="nf4",
-    #     bnb_4bit_compute_dtype=torch.bfloat16,
-    # )
-    # model = AutoModelForSequenceClassification.from_pretrained(model_id, quantization_config=bnb_config, num_labels=2)
-    # model.gradient_checkpointing_enable()
-    # model = prepare_model_for_kbit_training(model)
+    # model_og = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=2)
+    # model_og.to(device)
 
-    model_og = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=2)
-    model_og.to(device)
-    # model.to(device)
-    # model.resize_token_embeddings(128000)
-    # deberta_initialize_dW_B_with_svd_from_back_dW_A_zero(model, model_og, 16)
-    # deberta_initialize_dW_B_with_svd_from_back_dW_A_zero(model, model_og, 16)
-    # deberta_initialize_dW_B_with_svd_by_head(model, 16)
-    deberta_initialize_dW_with_span(model, model_og, 16)
-    # deberta_initialize_dW_with_span(model, model_og, 16)
+    # deberta_init_dW_A_with_svd_from_back_with_scaling_entire(model, model_og, 16)
+
     training_args = TrainingArguments(
         output_dir=f"{output_dir}",
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
-        warmup_steps=100,
-        num_train_epochs=10,
-        learning_rate=1.3e-4,
-        weight_decay=0,
-        fp16=True,
+        warmup_ratio=0.1,
+        num_train_epochs=30,
+        learning_rate=2e-4,
+        weight_decay=0.01,
         do_eval=True,
         do_train=True,
-        seed=42,
+        fp16=True,
+        seed=0,
         save_total_limit=1,
         report_to="wandb",
-        run_name=f"{task_name}-deberta_initialize_dW_with_span-rank16-fp16-{datetime}",
+        run_name=f"{task_name}-{exp_name}-{datetime}",
         logging_steps=1,
         logging_dir=f"{output_dir}/logs",
+        log_level="debug",
         push_to_hub=True,
         evaluation_strategy="steps",
         eval_steps=20,
@@ -873,12 +875,10 @@ def train():
         save_strategy="steps",
         load_best_model_at_end=True,
         greater_is_better=True,
-        metric_for_best_model="matthews_correlation",
-        # use_deterministic_algorithms=True,
-        # cls_dropout=0.1,
+        metric_for_best_model="accuracy",
     )
 
-    trainer = transformers.Trainer(
+    trainer = Trainer(
         model=model,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
@@ -889,6 +889,8 @@ def train():
     )
     # model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
     trainer.train()
+    # print(trainer.label_distribution)
+
     model.push_to_hub(MODEL_SAVE_REPO, use_temp_dir=True)
     tokenizer.push_to_hub(MODEL_SAVE_REPO, use_temp_dir=True)
 
@@ -1091,8 +1093,6 @@ def test():
 
 def main():
     train()
-    # train()
-    # evaluate()
 
 
 if __name__ == "__main__":
