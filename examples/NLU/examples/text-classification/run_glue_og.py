@@ -23,7 +23,7 @@ import sys
 import torch
 from dataclasses import dataclass, field
 from typing import Optional
-
+import pandas as pd
 import numpy as np
 from datasets import load_dataset, load_metric
 
@@ -47,6 +47,7 @@ from transformers.utils import check_min_version
 import torch.nn as nn
 from peft import get_peft_model, LoraConfig
 import wandb
+from peft import PeftModel, PeftConfig
 
 HUGGINGFACE_AUTH_TOKEN = "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"
 os.environ["WANDB_PROJECT"] = "DeBERTaV2_MRPC"
@@ -503,7 +504,7 @@ def deberta_init_dW_A_with_span(model, model_original, approx_rank):
         ].attention.self.value_proj.lora_A.default.weight.data = v_loraA_tensor.contiguous()
 
 
-def deberta_init_dW_B_with_svd_us_by_head(model):
+def deberta_init_dW_B_with_svd_us_by_head(model, approx_rank):
     len_of_layers = len(model.base_model.model.deberta.encoder.layer)
     for i in range(len_of_layers):
         q_loraB_head_list = []
@@ -513,12 +514,12 @@ def deberta_init_dW_B_with_svd_us_by_head(model):
         v_weight = model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.weight.T
 
         all_q_head = copy.deepcopy(q_weight)
-        all_q_head = all_q_head.reshape(24, 1536, 64)
+        all_q_head = all_q_head.reshape(approx_rank, 1536, 128)
 
         all_v_head = copy.deepcopy(v_weight)
-        all_v_head = all_v_head.reshape(24, 1536, 64)
+        all_v_head = all_v_head.reshape(approx_rank, 1536, 128)
 
-        for j in range(24):
+        for j in range(approx_rank):
             q_head = all_q_head[j]
             q_u, q_s, q_vt = torch.linalg.svd(q_head)
             q_loraB_head = q_u[:, :1] @ torch.diag(q_s[:1])
@@ -554,6 +555,59 @@ def deberta_init_dW_B_with_svd_us_by_head(model):
         )
 
         print(f"Complete init LoraB! layer: {i}, q_loraB: {q_loraB.shape}, v_loraB: {v_loraB.shape}")
+
+
+def deberta_init_dW_A_with_svd_us_by_head(model, approx_rank):
+    len_of_layers = len(model.base_model.model.deberta.encoder.layer)
+    for i in range(len_of_layers):
+        q_loraA_head_list = []
+        v_loraA_head_list = []
+
+        q_weight = model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.weight.T
+        v_weight = model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.weight.T
+
+        all_q_head = copy.deepcopy(q_weight)
+        all_q_head = all_q_head.reshape(approx_rank, 1536, 1536 // approx_rank)
+
+        all_v_head = copy.deepcopy(v_weight)
+        all_v_head = all_v_head.reshape(approx_rank, 1536, 1536 // approx_rank)
+
+        for j in range(approx_rank):
+            q_head = all_q_head[j]
+            q_u, q_s, q_vt = torch.linalg.svd(q_head)
+            q_loraA_head = q_u[:, :1] @ torch.diag(q_s[:1])
+
+            v_head = all_v_head[j]
+            v_u, v_s, v_vt = torch.linalg.svd(v_head)
+            v_loraA_head = v_u[:, :1] @ torch.diag(v_s[:1])
+
+            q_loraA_head_list.append(q_loraA_head)
+            v_loraA_head_list.append(v_loraA_head)
+        print(
+            f"Complete Merge Head! len of q_loraA_head_list: {len(q_loraA_head_list)},len of v_loraA_head_list: {len(v_loraA_head_list)}"
+        )
+        q_loraA = torch.cat(q_loraA_head_list, dim=1)
+        v_loraA = torch.cat(v_loraA_head_list, dim=1)
+
+        model.base_model.model.deberta.encoder.layer[
+            i
+        ].attention.self.query_proj.lora_A.default.weight.data = q_loraA.T.contiguous()
+        model.base_model.model.deberta.encoder.layer[
+            i
+        ].attention.self.value_proj.lora_A.default.weight.data = v_loraA.T.contiguous()
+
+        model.base_model.model.deberta.encoder.layer[
+            i
+        ].attention.self.query_proj.lora_B.default.weight.data = torch.zeros_like(
+            model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_B.default.weight.data
+        )
+        model.base_model.model.deberta.encoder.layer[
+            i
+        ].attention.self.value_proj.lora_B.default.weight.data = torch.zeros_like(
+            model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_B.default.weight.data
+        )
+
+        print(f"Complete init LoraA! layer: {i}, q_loraA: {q_loraA.shape}, v_loraA: {v_loraA.shape}")
 
 
 @dataclass
@@ -863,14 +917,14 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_args.model_name_or_path,
-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
-        config=config,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
-    )
+    # model = AutoModelForSequenceClassification.from_pretrained(
+    #     model_args.model_name_or_path,
+    #     from_tf=bool(".ckpt" in model_args.model_name_or_path),
+    #     config=config,
+    #     cache_dir=model_args.cache_dir,
+    #     revision=model_args.model_revision,
+    #     use_auth_token=True if model_args.use_auth_token else None,
+    # )
 
     config = LoraConfig(
         r=model_args.lora_r,
@@ -878,16 +932,80 @@ def main():
         target_modules=["query_proj", "value_proj"],
         task_type="SEQ_CLS",
     )
-    model = get_peft_model(model, config)
+    # model = get_peft_model(model, config)
     os.environ["WANDB_NAME"] = model_args.ex_type
-    print(model)
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # model_og = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v2-xxlarge", num_labels=2)
-    # model_og.to(device)
+    # print(model)
 
-    # if "deberta_init_dW_B_with_svd_by_head" in model_args.ex_type:
-    #     deberta_init_dW_B_with_svd_by_head(model, model_args.lora_r)
-    deberta_init_dW_B_with_svd_us_by_head(model)
+    if "deberta_init_dW_A_with_svd_us_by_head" in model_args.ex_type:
+        deberta_init_dW_A_with_svd_us_by_head(model, model_args.lora_r)
+        print("######deberta_init_dW_A_with_svd_us_by_head#####")
+    elif "init_dW_A_with_svd_from_back_with_scaling_entire" in model_args.ex_type:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        model_og = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v2-xxlarge", num_labels=2)
+        model_og.to(device)
+        deberta_init_dW_A_with_svd_from_back_with_scaling_entire(model, model_og, model_args.lora_r)
+        print("######init_dW_A_with_svd_from_back_with_scaling_entire#####")
+    elif "scale_after_lora" in model_args.ex_type:
+        print("######scale_after_lora#####")
+        normal_peft_model_id = "/home/lab/bumjun/low_rank/examples/NLU/output/deberta_init_dW_A_with_svd_us_by_head-rank24-alpha24-seed0/model/checkpoint-800"  # "/home/lab/bumjun/low_rank/examples/NLU/output/normal-rank16/model/checkpoint-3400"
+        normal_config = PeftConfig.from_pretrained(normal_peft_model_id)
+        tokenizer = AutoTokenizer.from_pretrained(normal_config.base_model_name_or_path)
+
+        model = AutoModelForSequenceClassification.from_pretrained(normal_config.base_model_name_or_path)
+        model = PeftModel.from_pretrained(model, normal_peft_model_id)
+        normal_rank16_norm_lora_A = {}
+        normal_rank16_norm_lora_B = {}
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name and "bias" not in name:
+                norm_lora_A = param.data.norm()
+                normal_rank16_norm_lora_A[name] = norm_lora_A.item()
+            elif "lora_B" in name and "bias" not in name:
+                norm_lora_B = param.data.norm()
+                normal_rank16_norm_lora_B[name] = norm_lora_B.item()
+
+        normal_rank16_norm_lora_A_df = pd.DataFrame.from_dict(
+            normal_rank16_norm_lora_A, orient="index", columns=["norm"]
+        )
+        normal_rank16_norm_lora_B_df = pd.DataFrame.from_dict(
+            normal_rank16_norm_lora_B, orient="index", columns=["norm"]
+        )
+        norm_A_divided_by_B = []
+        norm_B_divided_by_A = []
+        for i in range(len(normal_rank16_norm_lora_A_df)):
+            norm_A_divided_by_B.append(
+                np.sqrt(normal_rank16_norm_lora_A_df["norm"][i] / normal_rank16_norm_lora_B_df["norm"][i])
+            )
+            norm_B_divided_by_A.append(
+                np.sqrt(normal_rank16_norm_lora_B_df["norm"][i] / normal_rank16_norm_lora_A_df["norm"][i])
+            )
+
+        for i in range(len(model.base_model.model.deberta.encoder.layer)):
+            model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_A.default.weight.data = (
+                model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_A.default.weight.data
+                * norm_B_divided_by_A[2 * i]
+            )
+            model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_A.default.weight.data = (
+                model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_A.default.weight.data
+                * norm_B_divided_by_A[2 * i + 1]
+            )
+
+            model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_B.default.weight.data = (
+                model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_B.default.weight.data
+                * norm_A_divided_by_B[2 * i]
+            )
+            model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_B.default.weight.data = (
+                model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_B.default.weight.data
+                * norm_A_divided_by_B[2 * i + 1]
+            )
+        print("######Norm After Scale#####",
+            torch.norm(
+                model.base_model.model.deberta.encoder.layer[0].attention.self.value_proj.lora_A.default.weight.data
+            ),
+            torch.norm(
+                model.base_model.model.deberta.encoder.layer[0].attention.self.value_proj.lora_B.default.weight.data
+            ),
+        )
 
     trainable_params = []
     if model_args.apply_lora:

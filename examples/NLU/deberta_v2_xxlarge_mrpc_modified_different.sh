@@ -1,7 +1,7 @@
 
 export CUBLAS_WORKSPACE_CONFIG=":16:8" # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
 export PYTHONHASHSEED=0
-export output_dir="./output/deberta_init_dW_B_with_svd_by_head-rank8-alpha16-seed42"
+export output_dir="./output/deberta_init_dW_A_with_svd_us_by_head-rank24-alpha24-seed0-batch24-warmup30"
 python examples/text-classification/run_glue_og.py \
 --model_name_or_path microsoft/deberta-v2-xxlarge \
 --task_name mrpc \
@@ -9,7 +9,7 @@ python examples/text-classification/run_glue_og.py \
 --do_eval \
 --fp16 \
 --max_seq_length 128 \
---per_device_train_batch_size 16 \
+--per_device_train_batch_size 24 \
 --learning_rate 2e-4 \
 --num_train_epochs 30 \
 --output_dir $output_dir/model \
@@ -20,10 +20,10 @@ python examples/text-classification/run_glue_og.py \
 --eval_steps 10 \
 --save_strategy steps \
 --save_steps 100 \
---warmup_ratio 0.1 \
+--warmup_ratio 0.3 \
 --apply_lora \
---lora_r 4 \
---lora_alpha 8 \
---seed 555 \
+--lora_r 24 \
+--lora_alpha 24 \
+--seed 0 \
 --weight_decay 0.01 \
---ex_type init_dW_A_with_svd_from_back_with_scaling_entire-rank4-seed555 \
+--ex_type deberta_init_dW_A_with_svd_us_by_head-rank24-alpha24-seed0-batch24-warmup30 \
