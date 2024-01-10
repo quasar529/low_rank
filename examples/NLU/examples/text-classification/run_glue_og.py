@@ -91,6 +91,7 @@ def deberta_init_dW_with_svd(model, model_original, approx_rank):
     k_proj_v_loraB_weights = []
 
     len_of_layers = len(model_original.deberta.encoder.layer)
+
     with torch.no_grad():
         for i in range(len_of_layers):
             q_original_weight = model_original.deberta.encoder.layer[i].attention.self.query_proj.weight.data.T
@@ -124,6 +125,88 @@ def deberta_init_dW_with_svd(model, model_original, approx_rank):
             )
 
 
+def deberta_init_dW_with_svd(model, approx_rank):
+    len_of_layers = len(model.deberta.encoder.layer)
+    q_new_lora_A_list = []
+    v_new_lora_A_list = []
+
+    q_new_lora_B_list = []
+    v_new_lora_B_list = []
+
+    for layer_idx in range(len_of_layers):
+        q_original_weight = model.deberta.encoder.layer[layer_idx].attention.self.query_proj.weight.data.T
+        v_original_weight = model.deberta.encoder.layer[layer_idx].attention.self.value_proj.weight.data.T
+
+        q_og_lora_A = model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.query_proj.lora_A.default.weight.T
+        v_og_lora_A = model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.value_proj.lora_A.default.weight.T
+
+        q_proj_u, q_proj_s, q_proj_v = torch.linalg.svd(q_original_weight)
+        q_new_lora_A = q_proj_u[:, :approx_rank] @ torch.diag(q_proj_s[:approx_rank]).sqrt()
+        q_new_lora_B = torch.diag(q_proj_s[:approx_rank]).sqrt() @ q_proj_v[:approx_rank, :]
+
+        v_proj_u, v_proj_s, v_proj_v = torch.linalg.svd(v_original_weight)
+        v_new_lora_A = v_proj_u[:, :approx_rank] @ torch.diag(v_proj_s[:approx_rank]).sqrt()
+        v_new_lora_B = torch.diag(v_proj_s[:approx_rank]).sqrt() @ v_proj_v[:approx_rank, :]
+
+        for i in range(4):
+            print(f"Before Scale, q {i}th col Norm", torch.norm(q_new_lora_A[:, i]))
+
+            q_og_lora_A_icol_norm = torch.norm(q_og_lora_A[:, i])
+            q_new_lora_A_icol_norm = torch.norm(q_new_lora_A[:, i])
+
+            q_scale = q_og_lora_A_icol_norm / q_new_lora_A_icol_norm
+
+            q_new_lora_A[:, i] = q_new_lora_A[:, i] * q_scale
+            q_new_lora_B[:, i] = q_new_lora_B[:, i] * q_scale
+
+            print(f"After Scale, q {i}th col Norm", torch.norm(q_new_lora_A[:, i]))
+            print("####################")
+
+            print(f"Before Scale, v {i}th col Norm", torch.norm(v_new_lora_A[:, i]))
+
+            v_og_lora_A_icol_norm = torch.norm(v_og_lora_A[:, i])
+            v_new_lora_A_icol_norm = torch.norm(v_new_lora_A[:, i])
+
+            v_scale = v_og_lora_A_icol_norm / v_new_lora_A_icol_norm
+
+            v_new_lora_A[:, i] = v_new_lora_A[:, i] * v_scale
+            v_new_lora_B[:, i] = v_new_lora_B[:, i] * v_scale
+
+            print(f"After Scale, v {i}th col Norm", torch.norm(v_new_lora_A[:, i]))
+            print("####################")
+
+        q_new_lora_A_list.append(q_new_lora_A)
+        v_new_lora_A_list.append(v_new_lora_A)
+        q_new_lora_B_list.append(q_new_lora_B)
+        v_new_lora_B_list.append(v_new_lora_B)
+
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.query_proj.lora_A.default.weight.data = (
+            q_new_lora_A_list[layer_idx].transpose(0, 1).contiguous()
+        )
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.value_proj.lora_A.default.weight.data = (
+            v_new_lora_A_list[layer_idx].transpose(0, 1).contiguous()
+        )
+
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.query_proj.lora_B.default.weight.data = (
+            q_new_lora_B_list[layer_idx].transpose(0, 1).contiguous()
+        )
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.value_proj.lora_B.default.weight.data = (
+            v_new_lora_B_list[layer_idx].transpose(0, 1).contiguous()
+        )
+
+
 def deberta_init_dW_A_with_svd(model, model_original, approx_rank):
     q_proj_v_loraA_weights = []
     k_proj_v_loraA_weights = []
@@ -152,6 +235,68 @@ def deberta_init_dW_A_with_svd(model, model_original, approx_rank):
             model.deberta.encoder.layer[i].attention.self.value_proj.lora_A.default.weight.data = copy.deepcopy(
                 k_proj_v_loraA_weights[i].transpose(0, 1).contiguous()
             )
+
+
+def deberta_init_dW_A_with_svd_scaling(model, approx_rank):
+    len_of_layers = len(model.deberta.encoder.layer)
+    q_new_lora_A_list = []
+    v_new_lora_A_list = []
+
+    for layer_idx in range(len_of_layers):
+        q_original_weight = model.deberta.encoder.layer[layer_idx].attention.self.query_proj.weight.data.T
+        v_original_weight = model.deberta.encoder.layer[layer_idx].attention.self.value_proj.weight.data.T
+
+        q_og_lora_A = model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.query_proj.lora_A.default.weight.T
+        v_og_lora_A = model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.value_proj.lora_A.default.weight.T
+
+        q_proj_u, q_proj_s, q_proj_v = torch.linalg.svd(q_original_weight)
+        q_new_lora_A = q_proj_u[:, :approx_rank] @ torch.diag(q_proj_s[:approx_rank]).sqrt()
+
+        v_proj_u, v_proj_s, v_proj_v = torch.linalg.svd(v_original_weight)
+        v_new_lora_A = v_proj_u[:, :approx_rank] @ torch.diag(v_proj_s[:approx_rank]).sqrt()
+
+        for i in range(approx_rank):
+            print(f"Before Scale, q {i}th col Norm", torch.norm(q_new_lora_A[:, i]))
+
+            q_og_lora_A_icol_norm = torch.norm(q_og_lora_A[:, i])
+            q_new_lora_A_icol_norm = torch.norm(q_new_lora_A[:, i])
+
+            q_scale = q_og_lora_A_icol_norm / q_new_lora_A_icol_norm
+
+            q_new_lora_A[:, i] = q_new_lora_A[:, i] * q_scale
+
+            print(f"After Scale, q {i}th col Norm", torch.norm(q_new_lora_A[:, i]))
+            print("####################")
+
+            print(f"Before Scale, v {i}th col Norm", torch.norm(v_new_lora_A[:, i]))
+
+            v_og_lora_A_icol_norm = torch.norm(v_og_lora_A[:, i])
+            v_new_lora_A_icol_norm = torch.norm(v_new_lora_A[:, i])
+
+            v_scale = v_og_lora_A_icol_norm / v_new_lora_A_icol_norm
+
+            v_new_lora_A[:, i] = v_new_lora_A[:, i] * v_scale
+
+            print(f"After Scale, v {i}th col Norm", torch.norm(v_new_lora_A[:, i]))
+            print("####################")
+
+        q_new_lora_A_list.append(q_new_lora_A)
+        v_new_lora_A_list.append(v_new_lora_A)
+
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.query_proj.lora_A.default.weight.data = (
+            q_new_lora_A_list[layer_idx].transpose(0, 1).contiguous()
+        )
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.value_proj.lora_A.default.weight.data = (
+            v_new_lora_A_list[layer_idx].transpose(0, 1).contiguous()
+        )
 
 
 def deberta_init_dW_with_svd_from_back(model, model_original, approx_rank):
@@ -917,24 +1062,37 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
-    # model = AutoModelForSequenceClassification.from_pretrained(
-    #     model_args.model_name_or_path,
-    #     from_tf=bool(".ckpt" in model_args.model_name_or_path),
-    #     config=config,
-    #     cache_dir=model_args.cache_dir,
-    #     revision=model_args.model_revision,
-    #     use_auth_token=True if model_args.use_auth_token else None,
-    # )
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_args.model_name_or_path,
+        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        config=config,
+        cache_dir=model_args.cache_dir,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
+    )
 
+    """
+    peft.LoraConfig 와 loralib.lora는 다르게 계산된다.
+    peft.LoraConfig는 Linear forward 시
+    A = (r,d) B = (d,r) 이므로
+    result += B(A(x)) 
+    x @ A @ B
+    (d) @ (d,r) @ (r,d)
+    
+    loralib.lora는 Linear forward 시
+    A = (d,r) B = (r,d) 이므로
+    result += x @ A.T @ B.T
+    
+    """
     config = LoraConfig(
         r=model_args.lora_r,
         lora_alpha=model_args.lora_alpha,
         target_modules=["query_proj", "value_proj"],
         task_type="SEQ_CLS",
     )
-    # model = get_peft_model(model, config)
+    model = get_peft_model(model, config)
     os.environ["WANDB_NAME"] = model_args.ex_type
-    # print(model)
+    print(model)
 
     if "deberta_init_dW_A_with_svd_us_by_head" in model_args.ex_type:
         deberta_init_dW_A_with_svd_us_by_head(model, model_args.lora_r)
@@ -998,7 +1156,8 @@ def main():
                 model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_B.default.weight.data
                 * norm_A_divided_by_B[2 * i + 1]
             )
-        print("######Norm After Scale#####",
+        print(
+            "######Norm After Scale#####",
             torch.norm(
                 model.base_model.model.deberta.encoder.layer[0].attention.self.value_proj.lora_A.default.weight.data
             ),
@@ -1006,7 +1165,19 @@ def main():
                 model.base_model.model.deberta.encoder.layer[0].attention.self.value_proj.lora_B.default.weight.data
             ),
         )
-
+    elif "deberta_init_dW_A_with_svd_scaling" in model_args.ex_type:
+        print("######deberta_init_dW_A_with_svd_scaling#####")
+        print("\nSANITY CHECK\n")
+        print(
+            f"변경 전 LoRA A : {model.base_model.model.deberta.encoder.layer[0].attention.self.query_proj.lora_A.default.weight.data}"
+        )
+        deberta_init_dW_A_with_svd_scaling(model, model_args.lora_r)
+        print(
+            f"변경 후 LoRA A : {model.base_model.model.deberta.encoder.layer[0].attention.self.query_proj.lora_A.default.weight.data}"
+        )
+    elif "deberta_init_dW_with_svd" in model_args.ex_type:
+        print("######deberta_init_dW_with_svd#####")
+        deberta_init_dW_with_svd(model, model_args.lora_r)
     trainable_params = []
     if model_args.apply_lora:
         if model_args.lora_path is not None:
@@ -1046,6 +1217,7 @@ def main():
     if model_args.apply_bitfit:
         trainable_params.append("bias")
 
+    # lora 안붙은 layer는 학습 안되게 하기
     if len(trainable_params) > 0:
         for name, param in model.named_parameters():
             if name.startswith("deberta") or name.startswith("base_model"):
@@ -1057,6 +1229,7 @@ def main():
             else:
                 param.requires_grad = True
     print_trainable_parameters(model)
+
     # Preprocessing the datasets
     if data_args.task_name is not None:
         sentence1_key, sentence2_key = task_to_keys[data_args.task_name]
@@ -1177,6 +1350,7 @@ def main():
         data_collator = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8)
     else:
         data_collator = None
+
     print(model)
     # Initialize our Trainer
     trainer = Trainer(

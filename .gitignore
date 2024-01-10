@@ -148,3 +148,5 @@ post/
 
 /NLU/output
 /NLU/wandb
+
+/examples/NLU/runs
