@@ -41,6 +41,7 @@ from transformers import (
     default_data_collator,
     set_seed,
     EarlyStoppingCallback,
+    TrainerCallback,
 )
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.utils import check_min_version
@@ -67,6 +68,56 @@ task_to_keys = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+class CustomTrainer(Trainer):
+    def training_step(self, model, inputs):
+        labels = inputs.get("labels")
+        if labels is not None:
+            total = len(labels)
+            same_meaning = labels.sum().item()
+            different_meaning = total - same_meaning
+            ratio = same_meaning / total
+            print(f"Number of same_meaning: {same_meaning}, different_meaning: {different_meaning}, ratio: {ratio}")
+
+            if not 0.2 <= ratio <= 0.8:
+                print(f"Warning: The ratio at step {self.state.global_step} is out of the 20-80 range.")
+
+            wandb.log(
+                {
+                    "same_meaning": same_meaning,
+                    "different_meaning": different_meaning,
+                    "ratio": ratio,
+                },
+                step=self.state.global_step,
+            )
+
+        return super().training_step(model, inputs)
+
+
+class LabelRatioCallback(TrainerCallback):
+    def on_step_end(self, args, state, control, model=None, **kwargs):
+        print(f"kwargs keys: {kwargs.keys()}")
+
+        labels = kwargs.get("labels")
+        print(f"Labels shape: {labels.shape}, Labels data: {labels}")
+
+        # labels의 비율 계산
+        total = len(labels)
+        same_meaning = labels.sum().item()
+        different_meaning = total - same_meaning
+        ratio = same_meaning / total
+        print(f"same_meaning: {same_meaning}, different_meaning: {different_meaning}, ratio: {ratio}")
+
+        # 비율이 20-80 사이를 벗어나는지 검사하고, 벗어났을 경우 경고 메시지 출력
+        if not 0.2 <= ratio <= 0.8:
+            print(f"Warning: The ratio at step {state.global_step} is out of the 20-80 range.")
+
+        # 비율을 wandb에 로깅
+        wandb.log(
+            {"same_meaning": same_meaning, "different_meaning": different_meaning, "ratio": ratio},
+            step=state.global_step,
+        )
 
 
 def print_trainable_parameters(model):
@@ -755,6 +806,79 @@ def deberta_init_dW_A_with_svd_us_by_head(model, approx_rank):
         print(f"Complete init LoraA! layer: {i}, q_loraA: {q_loraA.shape}, v_loraA: {v_loraA.shape}")
 
 
+def deberta_init_dW_A_with_svd_us_by_head_scaling(model, approx_rank):
+    len_of_layers = len(model.base_model.model.deberta.encoder.layer)
+    for layer_idx in range(len_of_layers):
+        print(f"{layer_idx}th Layer ")
+        q_loraA_head_list = []
+        v_loraA_head_list = []
+        q_weight = model.base_model.model.deberta.encoder.layer[layer_idx].attention.self.query_proj.weight.T
+        v_weight = model.base_model.model.deberta.encoder.layer[layer_idx].attention.self.value_proj.weight.T
+
+        q_og_lora_A = model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.query_proj.lora_A.default.weight.T
+        v_og_lora_A = model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.value_proj.lora_A.default.weight.T
+
+        all_q_head = copy.deepcopy(q_weight)
+        all_q_head = all_q_head.reshape(approx_rank, 1536, 1536 // approx_rank)
+        all_v_head = copy.deepcopy(v_weight)
+        all_v_head = all_v_head.reshape(approx_rank, 1536, 1536 // approx_rank)
+
+        for j in range(approx_rank):
+            q_head = all_q_head[j]
+            q_u, q_s, q_vt = torch.linalg.svd(q_head)
+            q_loraA_head = q_u[:, :1] @ torch.diag(q_s[:1])
+            v_head = all_v_head[j]
+            v_u, v_s, v_vt = torch.linalg.svd(v_head)
+            v_loraA_head = v_u[:, :1] @ torch.diag(v_s[:1])
+            print("-" * 50)
+            print(
+                f"{j}th head norm Before Scaling \n q_loraA_head : {torch.norm(q_loraA_head)} v_loraA_head : {torch.norm(v_loraA_head)}"
+            )
+            q_og_lora_A_icol_norm = torch.norm(q_og_lora_A[:, j : j + 1])
+            v_og_lora_A_icol_norm = torch.norm(v_og_lora_A[:, j : j + 1])
+
+            q_scale = q_og_lora_A_icol_norm / torch.norm(q_loraA_head)
+            v_scale = v_og_lora_A_icol_norm / torch.norm(v_loraA_head)
+
+            q_loraA_head = q_loraA_head * q_scale
+            v_loraA_head = v_loraA_head * v_scale
+            print(
+                f"{j}th head norm After Scaling \n q_loraA_head : {torch.norm(q_loraA_head)} v_loraA_head : {torch.norm(v_loraA_head)}"
+            )
+            print("-" * 50)
+            q_loraA_head_list.append(q_loraA_head)
+            v_loraA_head_list.append(v_loraA_head)
+        q_loraA = torch.cat(q_loraA_head_list, dim=1)
+        v_loraA = torch.cat(v_loraA_head_list, dim=1)
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.query_proj.lora_A.default.weight.data = q_loraA.T.contiguous()
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.value_proj.lora_A.default.weight.data = v_loraA.T.contiguous()
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.query_proj.lora_B.default.weight.data = torch.zeros_like(
+            model.base_model.model.deberta.encoder.layer[
+                layer_idx
+            ].attention.self.query_proj.lora_B.default.weight.data
+        )
+        model.base_model.model.deberta.encoder.layer[
+            layer_idx
+        ].attention.self.value_proj.lora_B.default.weight.data = torch.zeros_like(
+            model.base_model.model.deberta.encoder.layer[
+                layer_idx
+            ].attention.self.value_proj.lora_B.default.weight.data
+        )
+        print(
+            f"Complete init LoraA! layer: {layer_idx}, q_loraA: {torch.norm(model.base_model.model.deberta.encoder.layer[layer_idx].attention.self.query_proj.lora_A.default.weight)}, v_loraA: {torch.norm(model.base_model.model.deberta.encoder.layer[layer_idx].attention.self.value_proj.lora_A.default.weight)}"
+        )
+
+
 @dataclass
 class DataTrainingArguments:
     """
@@ -1094,90 +1218,96 @@ def main():
     os.environ["WANDB_NAME"] = model_args.ex_type
     print(model)
 
-    if "deberta_init_dW_A_with_svd_us_by_head" in model_args.ex_type:
-        deberta_init_dW_A_with_svd_us_by_head(model, model_args.lora_r)
-        print("######deberta_init_dW_A_with_svd_us_by_head#####")
-    elif "init_dW_A_with_svd_from_back_with_scaling_entire" in model_args.ex_type:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        model_og = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v2-xxlarge", num_labels=2)
-        model_og.to(device)
-        deberta_init_dW_A_with_svd_from_back_with_scaling_entire(model, model_og, model_args.lora_r)
-        print("######init_dW_A_with_svd_from_back_with_scaling_entire#####")
-    elif "scale_after_lora" in model_args.ex_type:
-        print("######scale_after_lora#####")
-        normal_peft_model_id = "/home/lab/bumjun/low_rank/examples/NLU/output/deberta_init_dW_A_with_svd_us_by_head-rank24-alpha24-seed0/model/checkpoint-800"  # "/home/lab/bumjun/low_rank/examples/NLU/output/normal-rank16/model/checkpoint-3400"
-        normal_config = PeftConfig.from_pretrained(normal_peft_model_id)
-        tokenizer = AutoTokenizer.from_pretrained(normal_config.base_model_name_or_path)
+    # if "deberta_init_dW_A_with_svd_us_by_head" in model_args.ex_type:
+    #     deberta_init_dW_A_with_svd_us_by_head(model, model_args.lora_r)
+    #     print("######deberta_init_dW_A_with_svd_us_by_head#####")
+    # elif "init_dW_A_with_svd_from_back_with_scaling_entire" in model_args.ex_type:
+    #     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    #     model_og = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-v2-xxlarge", num_labels=2)
+    #     model_og.to(device)
+    #     deberta_init_dW_A_with_svd_from_back_with_scaling_entire(model, model_og, model_args.lora_r)
+    #     print("######init_dW_A_with_svd_from_back_with_scaling_entire#####")
+    # elif "scale_after_lora" in model_args.ex_type:
+    #     print("######scale_after_lora#####")
+    #     normal_peft_model_id = "/home/lab/bumjun/low_rank/examples/NLU/output/deberta_init_dW_A_with_svd_us_by_head-rank24-alpha24-seed0/model/checkpoint-800"  # "/home/lab/bumjun/low_rank/examples/NLU/output/normal-rank16/model/checkpoint-3400"
+    #     normal_config = PeftConfig.from_pretrained(normal_peft_model_id)
+    #     tokenizer = AutoTokenizer.from_pretrained(normal_config.base_model_name_or_path)
 
-        model = AutoModelForSequenceClassification.from_pretrained(normal_config.base_model_name_or_path)
-        model = PeftModel.from_pretrained(model, normal_peft_model_id)
-        normal_rank16_norm_lora_A = {}
-        normal_rank16_norm_lora_B = {}
+    #     model = AutoModelForSequenceClassification.from_pretrained(normal_config.base_model_name_or_path)
+    #     model = PeftModel.from_pretrained(model, normal_peft_model_id)
+    #     normal_rank16_norm_lora_A = {}
+    #     normal_rank16_norm_lora_B = {}
 
-        for name, param in model.named_parameters():
-            if "lora_A" in name and "bias" not in name:
-                norm_lora_A = param.data.norm()
-                normal_rank16_norm_lora_A[name] = norm_lora_A.item()
-            elif "lora_B" in name and "bias" not in name:
-                norm_lora_B = param.data.norm()
-                normal_rank16_norm_lora_B[name] = norm_lora_B.item()
+    #     for name, param in model.named_parameters():
+    #         if "lora_A" in name and "bias" not in name:
+    #             norm_lora_A = param.data.norm()
+    #             normal_rank16_norm_lora_A[name] = norm_lora_A.item()
+    #         elif "lora_B" in name and "bias" not in name:
+    #             norm_lora_B = param.data.norm()
+    #             normal_rank16_norm_lora_B[name] = norm_lora_B.item()
 
-        normal_rank16_norm_lora_A_df = pd.DataFrame.from_dict(
-            normal_rank16_norm_lora_A, orient="index", columns=["norm"]
-        )
-        normal_rank16_norm_lora_B_df = pd.DataFrame.from_dict(
-            normal_rank16_norm_lora_B, orient="index", columns=["norm"]
-        )
-        norm_A_divided_by_B = []
-        norm_B_divided_by_A = []
-        for i in range(len(normal_rank16_norm_lora_A_df)):
-            norm_A_divided_by_B.append(
-                np.sqrt(normal_rank16_norm_lora_A_df["norm"][i] / normal_rank16_norm_lora_B_df["norm"][i])
-            )
-            norm_B_divided_by_A.append(
-                np.sqrt(normal_rank16_norm_lora_B_df["norm"][i] / normal_rank16_norm_lora_A_df["norm"][i])
-            )
+    #     normal_rank16_norm_lora_A_df = pd.DataFrame.from_dict(
+    #         normal_rank16_norm_lora_A, orient="index", columns=["norm"]
+    #     )
+    #     normal_rank16_norm_lora_B_df = pd.DataFrame.from_dict(
+    #         normal_rank16_norm_lora_B, orient="index", columns=["norm"]
+    #     )
+    #     norm_A_divided_by_B = []
+    #     norm_B_divided_by_A = []
+    #     for i in range(len(normal_rank16_norm_lora_A_df)):
+    #         norm_A_divided_by_B.append(
+    #             np.sqrt(normal_rank16_norm_lora_A_df["norm"][i] / normal_rank16_norm_lora_B_df["norm"][i])
+    #         )
+    #         norm_B_divided_by_A.append(
+    #             np.sqrt(normal_rank16_norm_lora_B_df["norm"][i] / normal_rank16_norm_lora_A_df["norm"][i])
+    #         )
 
-        for i in range(len(model.base_model.model.deberta.encoder.layer)):
-            model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_A.default.weight.data = (
-                model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_A.default.weight.data
-                * norm_B_divided_by_A[2 * i]
-            )
-            model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_A.default.weight.data = (
-                model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_A.default.weight.data
-                * norm_B_divided_by_A[2 * i + 1]
-            )
+    #     for i in range(len(model.base_model.model.deberta.encoder.layer)):
+    #         model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_A.default.weight.data = (
+    #             model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_A.default.weight.data
+    #             * norm_B_divided_by_A[2 * i]
+    #         )
+    #         model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_A.default.weight.data = (
+    #             model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_A.default.weight.data
+    #             * norm_B_divided_by_A[2 * i + 1]
+    #         )
 
-            model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_B.default.weight.data = (
-                model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_B.default.weight.data
-                * norm_A_divided_by_B[2 * i]
-            )
-            model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_B.default.weight.data = (
-                model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_B.default.weight.data
-                * norm_A_divided_by_B[2 * i + 1]
-            )
-        print(
-            "######Norm After Scale#####",
-            torch.norm(
-                model.base_model.model.deberta.encoder.layer[0].attention.self.value_proj.lora_A.default.weight.data
-            ),
-            torch.norm(
-                model.base_model.model.deberta.encoder.layer[0].attention.self.value_proj.lora_B.default.weight.data
-            ),
-        )
-    elif "deberta_init_dW_A_with_svd_scaling" in model_args.ex_type:
-        print("######deberta_init_dW_A_with_svd_scaling#####")
-        print("\nSANITY CHECK\n")
-        print(
-            f"변경 전 LoRA A : {model.base_model.model.deberta.encoder.layer[0].attention.self.query_proj.lora_A.default.weight.data}"
-        )
-        deberta_init_dW_A_with_svd_scaling(model, model_args.lora_r)
-        print(
-            f"변경 후 LoRA A : {model.base_model.model.deberta.encoder.layer[0].attention.self.query_proj.lora_A.default.weight.data}"
-        )
-    elif "deberta_init_dW_with_svd" in model_args.ex_type:
-        print("######deberta_init_dW_with_svd#####")
-        deberta_init_dW_with_svd(model, model_args.lora_r)
+    #         model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_B.default.weight.data = (
+    #             model.base_model.model.deberta.encoder.layer[i].attention.self.query_proj.lora_B.default.weight.data
+    #             * norm_A_divided_by_B[2 * i]
+    #         )
+    #         model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_B.default.weight.data = (
+    #             model.base_model.model.deberta.encoder.layer[i].attention.self.value_proj.lora_B.default.weight.data
+    #             * norm_A_divided_by_B[2 * i + 1]
+    #         )
+    #     print(
+    #         "######Norm After Scale#####",
+    #         torch.norm(
+    #             model.base_model.model.deberta.encoder.layer[0].attention.self.value_proj.lora_A.default.weight.data
+    #         ),
+    #         torch.norm(
+    #             model.base_model.model.deberta.encoder.layer[0].attention.self.value_proj.lora_B.default.weight.data
+    #         ),
+    #     )
+    # elif "deberta_init_dW_A_with_svd_scaling" in model_args.ex_type:
+    #     print("######deberta_init_dW_A_with_svd_scaling#####")
+    #     print("\nSANITY CHECK\n")
+    #     print(
+    #         f"변경 전 LoRA A : {model.base_model.model.deberta.encoder.layer[0].attention.self.query_proj.lora_A.default.weight.data}"
+    #     )
+    #     deberta_init_dW_A_with_svd_scaling(model, model_args.lora_r)
+    #     print(
+    #         f"변경 후 LoRA A : {model.base_model.model.deberta.encoder.layer[0].attention.self.query_proj.lora_A.default.weight.data}"
+    #     )
+    # elif "deberta_init_dW_with_svd" in model_args.ex_type:
+    #     print("######deberta_init_dW_with_svd#####")
+    #     deberta_init_dW_with_svd(model, model_args.lora_r)
+    # elif "deberta_init_dW_A_with_svd_us_by_head_scaing" in model_args.ex_type:
+    #     print("-" * 50)
+    #     print("deberta_init_dW_A_with_svd_us_by_head_scaing")
+    #     deberta_init_dW_A_with_svd_us_by_head_scaing(model, model_args.lora_r)
+    print("-" * 25, "deberta_init_dW_A_with_svd_us_by_head_scaing", "-" * 25)
+    deberta_init_dW_A_with_svd_us_by_head_scaling(model, model_args.lora_r)
     trainable_params = []
     if model_args.apply_lora:
         if model_args.lora_path is not None:
@@ -1353,7 +1483,19 @@ def main():
 
     print(model)
     # Initialize our Trainer
-    trainer = Trainer(
+    # trainer = Trainer(
+    #     model=model,
+    #     args=training_args,
+    #     train_dataset=train_dataset if training_args.do_train else None,
+    #     eval_dataset=eval_dataset if training_args.do_eval else None,
+    #     compute_metrics=compute_metrics,
+    #     tokenizer=tokenizer,
+    #     data_collator=data_collator,
+    #     callbacks=[EarlyStoppingCallback(early_stopping_patience=10)],
+    # )
+
+    # USE CUSTOM TRAINER
+    trainer = CustomTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
@@ -1363,7 +1505,6 @@ def main():
         data_collator=data_collator,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=15)],
     )
-
     # Training
     if training_args.do_train:
         checkpoint = None
